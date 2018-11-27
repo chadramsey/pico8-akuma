@@ -1,0 +1,868 @@
+pico-8 cartridge // http://www.pico-8.com
+version 16
+__lua__
+--global variables
+screen_w=127
+screen_h=127
+screen_cel_w=flr(screen_w/8)
+screen_cel_h=flr(screen_h/8)
+display_splash=true
+display_menu=false
+display_stage=false
+initial_dialog_shown=false
+
+left_screen_transition_in_progress=false
+right_screen_transition_in_progress=false
+bottom_screen_transition_in_progress=false
+top_screen_transition_in_progress=false
+
+left_screen_transition_complete=false
+right_screen_transition_complete=false
+bottom_screen_transition_complete=false
+top_screen_transition_complete=false
+
+--fade table
+local fadetable={
+ {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+ {1,1,1,1,1,1,1,0,0,0,0,0,0,0,0},
+ {2,2,2,2,2,2,1,1,1,0,0,0,0,0,0},
+ {3,3,3,3,3,3,1,1,1,0,0,0,0,0,0},
+ {4,4,4,2,2,2,2,2,1,1,0,0,0,0,0},
+ {5,5,5,5,5,1,1,1,1,1,0,0,0,0,0},
+ {6,6,13,13,13,13,5,5,5,5,1,1,1,0,0},
+ {7,6,6,6,6,13,13,13,5,5,5,1,1,0,0},
+ {8,8,8,8,2,2,2,2,2,2,0,0,0,0,0},
+ {9,9,9,4,4,4,4,4,4,5,5,0,0,0,0},
+ {10,10,9,9,9,4,4,4,5,5,5,5,0,0,0},
+ {11,11,11,3,3,3,3,3,3,3,0,0,0,0,0},
+ {12,12,12,12,12,3,3,1,1,1,1,1,1,0,0},
+ {13,13,13,5,5,5,5,1,1,1,1,1,0,0,0},
+ {14,14,14,13,4,4,2,2,2,2,2,1,1,0,0},
+ {15,15,6,13,13,13,5,5,5,5,5,1,1,0,0}
+}
+
+function fade(i)
+ for c=0,15 do
+  if flr(i+1)>=16 then
+   pal(c,0)
+  else
+   pal(c,fadetable[c+1][flr(i+1)])
+  end
+ end
+end
+
+--initializers
+function init_splash()
+  splash = {}
+  splash.tick=0
+  splash.pal_color=10
+  splash.pal_index=0
+  splash.wait_time=45
+end
+
+function init_menu()
+  menu = {}
+  menu.is_music_playing=false
+  menu.move_sound=3
+  menu.select_sound=0
+
+  menu.selector = {}
+  menu.selector.pos_x=24
+  menu.selector.pos_y=8
+  menu.selector.s_width=(screen_w/2)-menu.selector.pos_x
+  menu.selector.s_height=(screen_h/2)+menu.selector.pos_y
+  menu.selector.sprite_index=8
+  menu.selector.is_start_selected=true
+  menu.selector.is_controls_selected=false
+  menu.selector.pal_index=16  
+end
+
+function init_stage()
+  stage = {}
+  stage.tick=0
+  stage.pal_index=16
+  stage.temp_camera_x_pos=0
+  stage.temp_camera_y_pos=0
+  stage.camera_x_pos=0
+  stage.camera_y_pos=0
+  stage.camera_speed=4
+  stage.x_map_cell_index=0
+  stage.y_map_cell_index=0
+  stage.ui_sprite_index=81
+  stage.soul_count=0
+
+  stage.environment = {}
+  stage.environment.tick=0
+  stage.environment.wait_time=30
+
+  stage.enemies = {}
+  stage.enemies.tick=0
+  stage.enemies.wait_time=3
+
+  stage.player = {}
+  stage.player.tick=0
+  stage.player.wait_time=3
+end
+
+function init_dialog()
+  dialog = {}
+  dialog.tick=0
+  dialog.wait_time=45
+  dialog.display_dialog=false
+  dialog.render_speed=3.0
+  dialog.x_start_pos=0
+  dialog.y_start_pos=screen_h-32
+  dialog.x_end_pos=screen_w
+  dialog.y_end_pos=screen_h-27
+  dialog.msg_index=1
+  dialog.end_of_msgs=false
+  dialog.speaker=""
+  dialog.messages = {""}
+end
+
+function init_player()
+  player = {}
+  player.recovery_tick=0
+  player.x_pos=48
+  player.y_pos=56
+  player.sprite_w=16
+  player.sprite_h=24
+  player.x_cel_offset=1
+  player.y_cel_offset=2
+  player.x_cel_pos=flr(player.x_pos/8)+player.x_cel_offset
+  player.y_cel_pos=flr(player.y_pos/8)+player.y_cel_offset
+  player.speed=2
+  player.animation_frames = {{72,74,72,76},{24,26,24,28}}
+  player.animation_frame_index=1
+  player.animation_direction_index=2
+  player.sprite_index=player.animation_frames[player.animation_direction_index][player.animation_frame_index]
+  player.is_in_motion=false
+  player.attack_radius=0
+  player.attack_max_radius=24
+  player.is_attacking=false
+  player.is_attack_opening=false
+  player.is_attack_closing=false
+  player.is_recovering=false
+  player.recovery_time=60
+  player.life=3
+
+  player.items = {}
+  player.items.has_key=false
+end
+
+function init_items()
+  items = {}
+  
+  key = {}
+  key.sprite_index=9
+  key.x_pos=64
+  key.y_pos=32
+  key.x_cel_pos=flr(key.x_pos/8)
+  key.y_cel_pos=flr(key.y_pos/8) 
+
+  add(items,key)
+end
+
+function init_enemies()
+  enemies = {}
+end
+
+function add_moss_to_enemies()
+  moss = {}
+  moss.x_pos=(flr(rnd(120)))
+  moss.y_pos=(flr(rnd(120)))
+  moss.dx_pos=0
+  moss.dy_pos=0
+  moss.x_cel_pos=flr(moss.x_pos/8)
+  moss.y_cel_pos=flr(moss.y_pos/8)
+  moss.x_cel_offset=1
+  moss.y_cel_offset=1
+  moss.is_in_motion=false
+  moss.animation_frames = {138,139}
+  moss.animation_frame_index=1
+  moss.sprite_index=moss.animation_frames[1]
+  moss.is_eliminated=false
+
+  add(enemies,moss)
+end
+
+function add_spark_to_enemies()
+  spark = {}
+  spark.x_pos=(flr(rnd(120)))
+  spark.y_pos=(flr(rnd(120)))
+  spark.dx_pos=0
+  spark.dy_pos=0
+  spark.x_cel_pos=flr(moss.x_pos/8)
+  spark.y_cel_pos=flr(moss.y_pos/8)
+  spark.x_cel_offset=1
+  spark.y_cel_offset=1
+  spark.is_in_motion=false
+  spark.animation_frames = {130,131}
+  spark.animation_frame_index=1
+  spark.sprite_index=moss.animation_frames[1]
+  spark.is_eliminated=false
+
+  add(enemies,spark)
+end
+
+function add_droplette_to_enemies()
+  droplette = {}
+  droplette.x_pos=(flr(rnd(120)))
+  droplette.y_pos=(flr(rnd(120)))
+  droplette.dx_pos=0
+  droplette.dy_pos=0
+  droplette.x_cel_pos=flr(moss.x_pos/8)
+  droplette.y_cel_pos=flr(moss.y_pos/8)
+  droplette.x_cel_offset=1
+  droplette.y_cel_offset=1
+  droplette.is_in_motion=false
+  droplette.animation_frames = {134,135}
+  droplette.animation_frame_index=1
+  droplette.sprite_index=moss.animation_frames[1]
+  droplette.is_eliminated=false
+
+  add(enemies,droplette)
+end
+
+--primary functions
+function _init()
+  init_splash()
+  init_menu()
+  init_stage()
+  init_player()
+  init_items()
+  init_enemies()
+  init_dialog()
+
+  for i=1,2 do
+    add_moss_to_enemies()
+    add_spark_to_enemies()
+    add_droplette_to_enemies()
+  end
+end
+
+function _update()
+  splash.tick+=1
+  stage.tick+=1
+  if display_menu then 
+    handle_menu_updates()
+  end
+  if display_stage then
+    handle_stage_updates()
+  end
+end
+
+function _draw()
+  cls()
+  if player.life<=0 then
+    handle_reload()
+  end
+  if display_splash then 
+    render_splash()
+  end
+  if display_menu then 
+    render_menu() 
+  end
+  if display_stage then
+    render_stage()
+  end
+end
+
+--custom functions
+function handle_stage_updates()
+  if dialog.display_dialog==true then
+    return
+  end
+  handle_left_movement_action()
+  handle_right_movement_action()
+  handle_down_movement_action()
+  handle_up_movement_action()
+  handle_combat_action()
+  if btn(0)==false and btn(1)==false and btn(2)==false and btn(3)==false then
+   player.is_in_motion=false
+  end
+  foreach(enemies, function(enemy)
+    if enemy.is_eliminated then
+      del(enemies, enemy)
+    end
+  end)
+end
+
+function handle_combat_action()
+  if btnp(5) and is_screen_transition_in_progress()==false and dialog.display_dialog==false or player.is_attacking then
+    if player.attack_radius<player.attack_max_radius and player.is_attack_closing==false then
+      player.is_attacking=true
+      player.is_attack_opening=true
+      player.is_attack_closing=false
+    elseif player.attack_radius>=player.attack_max_radius then
+      player.is_attack_closing=true
+      player.is_attack_opening=false
+    end
+    if player.is_attack_opening then
+      player.attack_radius+=2
+    else
+      player.attack_radius-=2
+    end
+    if player.attack_radius==0 then
+      player.is_attacking=false
+      player.is_attack_opening=false
+      player.is_attack_closing=false
+    end
+  end
+end
+
+function handle_left_movement_action()
+  if player.is_attacking then
+    return
+  end
+  if btn(0) and player.x_pos>=screen_w-127 and is_screen_transition_in_progress()==false then
+    player.x_pos-=player.speed
+    player.is_in_motion=true
+  elseif stage.x_map_cell_index!=0 and player.x_pos<screen_w-127 and stage.camera_x_pos>=stage.temp_camera_x_pos-127 then
+    player.x_pos-=1
+    stage.camera_x_pos-=stage.camera_speed
+    camera(stage.camera_x_pos,stage.camera_y_pos)
+    left_screen_transition_in_progress=true
+  elseif left_screen_transition_in_progress then
+    stage.x_map_cell_index-=1
+    left_screen_transition_complete=true
+    left_screen_transition_in_progress=false
+  end
+  player.x_cel_pos=flr(player.x_pos/8)+player.x_cel_offset
+end
+
+function handle_right_movement_action()
+  if player.is_attacking then
+    return
+  end
+  if btn(1) and player.x_pos<=screen_w-16 and is_screen_transition_in_progress()==false then
+    player.x_pos+=player.speed
+    player.is_in_motion=true
+  elseif player.x_pos>screen_w-16 and stage.camera_x_pos<=screen_w then
+    player.x_pos+=1
+    stage.camera_x_pos+=stage.camera_speed
+    camera(stage.camera_x_pos,stage.camera_y_pos)
+    right_screen_transition_in_progress=true
+  elseif right_screen_transition_in_progress then
+    stage.x_map_cell_index+=1
+    right_screen_transition_complete=true
+    right_screen_transition_in_progress=false
+  end
+  player.x_cel_pos=flr(player.x_pos/8)+player.x_cel_offset
+end
+
+function handle_up_movement_action()
+  if player.is_attacking then
+    return
+  end
+  if btn(2) and player.y_pos>=screen_h-127 and is_screen_transition_in_progress()==false then
+    player.y_pos-=player.speed
+    player.is_in_motion=true
+    player.animation_direction_index=1
+  elseif stage.y_map_cell_index!=0 and player.y_pos<screen_h-127 and stage.camera_y_pos>=stage.temp_camera_y_pos-127 then
+    player.y_pos-=1
+    stage.camera_y_pos-=stage.camera_speed
+    camera(stage.camera_x_pos,stage.camera_y_pos)
+    top_screen_transition_in_progress=true
+  elseif top_screen_transition_in_progress then
+    stage.y_map_cell_index-=1
+    top_screen_transition_complete=true
+    top_screen_transition_in_progress=false
+  end
+  player.y_cel_pos=flr(player.y_pos/8)+player.y_cel_offset
+end
+
+function handle_down_movement_action()
+  if player.is_attacking then
+    return
+  end
+  if btn(3) and (player.y_pos<=screen_h-24) and is_screen_transition_in_progress()==false then
+    player.y_pos+=player.speed
+    player.is_in_motion=true
+    player.animation_direction_index=2
+  elseif player.y_pos>screen_h-32 and stage.camera_y_pos<=screen_h then
+    player.y_pos+=1
+    stage.camera_y_pos+=stage.camera_speed
+    camera(stage.camera_x_pos,stage.camera_y_pos)
+    bottom_screen_transition_in_progress=true
+  elseif bottom_screen_transition_in_progress then
+    stage.y_map_cell_index+=1
+    bottom_screen_transition_complete=true
+    bottom_screen_transition_in_progress=false
+  end
+  player.y_cel_pos=flr(player.y_pos/8)+player.y_cel_offset
+end
+
+function is_screen_transition_in_progress()
+  return bottom_screen_transition_in_progress or 
+  top_screen_transition_in_progress or 
+  right_screen_transition_in_progress or 
+  left_screen_transition_in_progress
+end
+
+function handle_menu_updates()
+  if display_menu and menu.selector.is_controls_selected and btnp(2) then 
+    menu.selector.is_start_selected=true
+    menu.selector.is_controls_selected=false
+  end
+  if display_menu and menu.selector.is_start_selected and btnp(3) then 
+    menu.selector.is_start_selected=false
+    menu.selector.is_controls_selected=true
+  end
+  if display_menu and btnp(4) then
+    sfx(menu.select_sound)
+    if menu.selector.is_start_selected then
+      display_menu=false
+      display_stage=true
+      refresh_screen()
+    end
+  end
+end
+
+function render_stage()
+  stage.environment.tick+=1
+  stage.enemies.tick+=1
+  stage.player.tick+=1
+  if stage.pal_index>0 then 
+    stage.pal_index-=1
+  end
+  fade(stage.pal_index)
+  if stage.environment.tick>stage.environment.wait_time then
+    stage.environment.tick=0
+    handle_environment_updates()
+  end
+  if stage.enemies.tick>stage.enemies.wait_time then
+    stage.enemies.tick=0
+    handle_enemy_updates()
+  end
+  if player.is_recovering then
+    if player.recovery_tick>player.recovery_time then
+      player.recovery_tick=0
+      player.is_recovering=false
+    else
+      player.recovery_tick+=1
+      player.sprite_index=1
+    end
+  end
+  if stage.player.tick>stage.player.wait_time then
+    stage.player.tick=0
+    handle_player_updates()
+  end
+  handle_collision_checks()
+  render_stage_elements()
+  if initial_dialog_shown==false and dialog.tick<dialog.wait_time then
+    dialog.tick+=1
+  elseif initial_dialog_shown==false and dialog.tick==dialog.wait_time then
+    initial_dialog_shown=true
+  display_dialog_message("akuma",{"i need to find","what i came here for so i can","get out of this vile place"})
+  end
+  if dialog.display_dialog then
+    render_dialog_box()
+  end
+  print(stage.soul_count,stage.camera_x_pos+12,stage.camera_y_pos+32,7)
+end
+
+function render_dialog_box()
+  if dialog.y_end_pos<127 then
+    dialog.y_end_pos+=1*dialog.render_speed
+  end
+  local more = "🅾️"
+  dialog.tick+=1
+  rectfill(dialog.x_start_pos,dialog.y_start_pos,dialog.x_end_pos,dialog.y_end_pos,1)
+  if dialog.msg_index>#dialog.messages then
+    dialog.end_of_msgs=true
+    dialog.display_dialog=false
+  end
+  if dialog.y_end_pos==127 and dialog.end_of_msgs==false then
+    print(dialog.speaker,((screen_w/2)-#dialog.speaker*2),100,12)
+    print(dialog.messages[dialog.msg_index],((screen_w/2)-#dialog.messages[dialog.msg_index]*2),109,7)
+      if dialog.tick<=dialog.wait_time/2 then
+        print(more,((screen_w/2)-#more*2)+52,117,7)
+      elseif dialog.tick>=dialog.wait_time then
+        print("",((screen_w/2))+52,117,7)
+        dialog.tick=0
+      end
+  end
+  if dialog.display_dialog and btnp(4) then
+    dialog.msg_index+=1
+  end
+end
+
+function render_stage_elements()
+  cls()
+  map(0,0,0,0,32,32)
+  if right_screen_transition_complete then
+    stage.temp_camera_x_pos=stage.camera_x_pos
+    screen_w=127*(stage.x_map_cell_index+1)
+    screen_cel_w=flr(screen_w/8)
+    right_screen_transition_complete=false
+  elseif left_screen_transition_complete then
+    stage.temp_camera_x_pos=stage.camera_x_pos
+    screen_w-=127
+    screen_cel_w=flr(screen_w/8)
+    left_screen_transition_complete=false
+  elseif bottom_screen_transition_complete then
+    stage.temp_camera_y_pos=stage.camera_y_pos
+    screen_h=127*(stage.y_map_cell_index+1)
+    screen_cel_h=flr(screen_h/8)
+    bottom_screen_transition_complete=false
+  elseif top_screen_transition_complete then
+    stage.temp_camera_y_pos=stage.camera_y_pos
+    screen_h-=127
+    screen_cel_h=flr(screen_h/8)
+    top_screen_transition_complete=false
+  end
+  if player.is_attacking then
+    player.sprite_index=78
+    circfill(player.x_pos+8,player.y_pos+12,player.attack_radius,1)
+  end
+  foreach(enemies, function(enemy)
+    if player.is_attacking then
+      if enemy.x_cel_pos<=(flr((player.x_pos+player.attack_radius)/8)+player.x_cel_offset) and enemy.x_cel_pos>=(flr((player.x_pos-player.attack_radius)/8)+player.x_cel_offset) and enemy.y_cel_pos<=(flr((player.y_pos+player.attack_radius)/8)+player.y_cel_offset) and enemy.y_cel_pos>=(flr((player.y_pos-player.attack_radius)/8)+player.y_cel_offset) then
+        enemy.is_eliminated=true
+        stage.soul_count+=1
+      end
+    end
+    spr(enemy.sprite_index,enemy.x_pos,enemy.y_pos,1,1)
+  end)
+  foreach(items, function(item)
+    spr(item.sprite_index,item.x_pos,item.y_pos,1,1)
+  end)
+  spr(player.sprite_index,player.x_pos,player.y_pos,2,3)
+  spr(stage.ui_sprite_index,4+stage.camera_x_pos,4+stage.camera_y_pos,3,3)
+  for i=4,player.life*4,4 do
+    spr(84,2+(i+stage.camera_x_pos),14+stage.camera_y_pos,1,1)
+  end
+end
+
+function handle_collision_checks()
+  --key
+  foreach(items, function(key)
+    if player.x_cel_pos==key.x_cel_pos and player.y_cel_pos==key.y_cel_pos and player.items.has_key==false then
+      player.items.has_key=true
+      if dialog.display_dialog==false then
+      display_dialog_message("akuma",{"i'm sure this'll", "come in handy"})
+      key.y_pos=player.y_pos-8
+      key.x_pos=player.x_pos+4
+      player.sprite_index=30
+      end
+    end
+  end)
+  if player.items.has_key and dialog.display_dialog==false then
+    key.sprite_index=1
+  end
+  foreach(enemies, function(enemy)
+    if (player.x_cel_pos==enemy.x_cel_pos or player.x_cel_pos==enemy.x_cel_pos-1) and (player.y_cel_pos==enemy.y_cel_pos or player.y_cel_pos==enemy.y_cel_pos-1) and player.is_recovering==false then
+      player.life-=1
+      player.is_recovering=true
+      player.x_pos=player.x_pos+(rnd(20)-10)
+      player.y_pos=player.y_pos+(rnd(20)-10)
+    end
+  end)
+end
+
+function display_dialog_message(speaker,messages)
+  init_dialog()
+  dialog.display_dialog=true
+  dialog.speaker=speaker
+  dialog.messages=messages
+end
+
+function handle_environment_updates()
+  for x=0,screen_cel_w do
+    for y=0,screen_cel_h do
+      --flowers
+      if mget(x,y)==192 then
+        mset(x,y,194)
+        mset(x+1,y,195)
+        mset(x,y+1,210)
+        mset(x+1,y+1,211)
+      elseif mget(x,y)==194 then
+        mset(x,y,192)
+        mset(x+1,y,193)
+        mset(x,y+1,208)
+        mset(x+1,y+1,209)
+      end
+    end
+  end
+end
+
+function handle_player_updates()
+  if dialog.display_dialog==true then
+    return
+  end
+  if player.is_in_motion and player.animation_frame_index<#player.animation_frames[1] then
+    player.animation_frame_index+=1
+  else
+    player.animation_frame_index=1
+  end
+  player.sprite_index=player.animation_frames[player.animation_direction_index][player.animation_frame_index]
+end
+
+function handle_enemy_updates()
+  --enemies
+  if dialog.display_dialog==true then
+    return
+  end
+  foreach(enemies, function(enemy)
+    if enemy.is_in_motion==false then
+      enemy.dx_pos=flr((enemy.x_pos)+(rnd(40)-20))
+      enemy.dy_pos=flr((enemy.y_pos)+(rnd(40)-20))
+      enemy.is_in_motion=true
+    else
+      if enemy.x_pos>screen_w-8 then
+        enemy.dx_pos=flr((enemy.x_pos)+(rnd(40))-40)
+      elseif enemy.x_pos<=screen_w-127 then
+        enemy.dx_pos=flr((enemy.x_pos)+(rnd(40)))
+      end
+      if enemy.y_pos>screen_h-8 then
+        enemy.dy_pos=flr((enemy.y_pos)+(rnd(40))-40)
+      elseif enemy.y_pos<=screen_h-127 then
+        enemy.dy_pos=flr((enemy.y_pos)+(rnd(40)))
+      end
+      if enemy.x_pos<enemy.dx_pos then
+        enemy.x_pos+=1
+      elseif enemy.x_pos>enemy.dx_pos then
+        enemy.x_pos-=1
+      end
+      if enemy.y_pos<enemy.dy_pos then
+        enemy.y_pos+=1
+      elseif enemy.y_pos>enemy.dy_pos then
+        enemy.y_pos-=1
+      end
+      if enemy.x_pos==enemy.dx_pos and enemy.y_pos==enemy.dy_pos then
+        enemy.x_pos=enemy.dx_pos
+        enemy.y_pos=enemy.dy_pos
+        enemy.is_in_motion=false
+      end
+      if enemy.animation_frame_index<#enemy.animation_frames then
+        enemy.animation_frame_index+=1
+      else
+        enemy.animation_frame_index=1
+      end
+      enemy.sprite_index=enemy.animation_frames[enemy.animation_frame_index]
+    end
+    enemy.x_cel_pos=flr(enemy.x_pos/8)+enemy.x_cel_offset
+    enemy.y_cel_pos=flr(enemy.y_pos/8)+enemy.y_cel_offset
+  end)
+end
+
+function render_menu()
+  local home = "⌂ chadramsey.github.io"
+  local start = "start"
+  local controls = "controls"
+  if menu.selector.pal_index>0 then 
+    menu.selector.pal_index-=0.25
+    fade(menu.selector.pal_index)
+  else
+    if menu.selector.is_start_selected then
+      spr(menu.selector.sprite_index,menu.selector.s_width,menu.selector.s_height,1,1)
+      print(start,((screen_w/2)-#start+1),(screen_h/2)+8,7)
+      print(controls,((screen_w/2)-#start),(screen_h/2)+16,7)
+    end
+    if menu.selector.is_controls_selected then
+      spr(menu.selector.sprite_index,menu.selector.s_width,menu.selector.s_height+8,1,1)
+      print(start,((screen_w/2)-#start),(screen_h/2)+8,7)
+      print(controls,((screen_w/2)-#start+1),(screen_h/2)+16,7)
+    end
+  end
+  spr(1,32,16,7,5)
+  print(home,((screen_w/2)-#home*2),(screen_h)-8,7)
+end
+
+function handle_reload()
+  _init()
+end
+
+function render_splash()
+  local message = "bytefox presents"
+  print(message,((screen_w/2)-#message*2),screen_h/2,splash.pal_color)
+  if splash.tick>splash.wait_time then 
+    fade(splash.pal_index)
+    if splash.pal_index<16 then 
+      splash.pal_index+=2
+    end
+  end
+  if splash.pal_index==16 then
+    dispaly_splash=false
+    display_menu=true
+    refresh_screen()
+  end
+end
+
+function refresh_screen()
+  cls()
+  pal()
+end
+__gfx__
+000000000000000000000000000000000000000000000000000000000000000001100110a110011a000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000177007719aaaaaa9000000000000000000000000000000000000000000000000
+00700700000000000000000000000111111000000000111111100000000000007100001719a11a91000000000000000000000000000000000000000000000000
+000770000000000000000000000111111111000000011111111100000000000077777777019aa910000000000000000000000000000000000000000000000000
+000770000000000000000000001167776611100000111667776110000000000017d77d710019a100000000000000000000000000000000000000000000000000
+007007000000000000000000011677777711100000111777777611000000000017d77d7100197a10000000000000000000000000000000000000000000000000
+0000000000000000000000001167777777761100011677777777611000000000017777100019a100000000000000000000000000000000000000000000000000
+0000000000000000000000001677711117771100011777111117761100000000001111000019aa10000000000000000000000000000000000000000000000000
+00000000000000000000000016771100167771000177761100117761000000000000000000000000000111000011100000011100001110000000000000000000
+00000000000000000000000016771100011771000177110000117761000000000001110000111000001dd510015dd100001dd510015dd1000001110000111000
+0000000000000000000000001677611001111100011111000116776100000000001dd510015dd10001551d1001d1551001551d1001d15510001dd510015dd100
+000000000000000000000000167771100000000000000000011777610000000001551d1001d1551001d1010000101d1001d1010000101d1001551d1001d15510
+000000000000000000000000167776117666666666666667116777610000000001d1010000101d100161001111001610016100111100161001d1010000101d10
+00000000000000000000000016777777777777777777777777777761000000000161001111001610015611555511651001561155551165100161001111001610
+000000000000000000000000116677777777777777777777777766110000000001561155551165100155d5d6dd5d55100155d5d6dd5d5510015d11555511d510
+00000000000000000000000001167777777777777777777777776110000000000155d5d6dd5d55100015555dd55551000015555dd55551001155d5dddd5d5511
+00000000000000000000000000116777777777777777777777761100000000000015555dd555510000015775577510000001577557751000ff155556d55551ff
+000000000000000000000000001167777777777777777777777611000000000000015775577510000001471ff17410000001471ff1741000ff115715517511ff
+00000000000000000000000000016677777dd777777dd77777661000000000000001471ff174100000114f1ff1f4110000114f1ff1f41100fff1471ff1741fff
+00000000000000000000000000011677777dd777777dd777776110000000000000114f1ff1f4110001c114ffff412200002214ffff411c101111477ff7741111
+00000000000000000000000000001167777dd777777dd777761100000000000001c114ffff411c10141cc114411c12100121c114411cc141144114f88f411441
+00000000000000000000000000001167777dd777777dd7777611000000000000141cc114411cc1411f416cc11ccc1f1001f1cc611ccc14f10144111441114410
+00000000000000000000000000000167777dd777777dd77776100000000000001441c6c11ccc14411f41ccccccc1110000111ccccccc14f1001221c11c122100
+00000000000000000000000000000167777dd777777dd77776100000000000001f11cccccccc11f11ff1ccccccc1100000011ccccccc1ff1001116ccccc11100
+00000000000000000000000000000166777777777777777766100000000000001ff11cccccc11ff11f111ccccc1cc000000cc1ccccc111f100011cccccc11000
+00000000000000000000000000000166777777777777777766100000000000001f1cc11aa11cc1f1011cc11aa1c1110000111c1aa11cc1100001c1caac1c1000
+00000000000000000000000000000116677777777777777661100000000000000111ccc11ccc111001111cc11c144100001441c11cc111100011cc1111cc1100
+0000000000000000000000000000011166666666666666661110000000000000001411cccc114100001221ccc14441000014441ccc122100001411cccc114100
+00000000000000000000000000000011111111111111111111000000000000000011441111441100001111111144110000114411111111000014441111444100
+00000000000000000000000000000000111111111111111100000000000000000000111111110000000001111111000000001111111000000001111111111000
+00000000000000000000000000000000000000000000000000000000000000000000001111000000000000011100000000000011100000000000001111000000
+00000000000000000000001100001110111001110011101110011100001100000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000016610001611161001610016101661166100016610000000000000000000000111000011100000011100001110000000000000000000
+00000000000000000000177771001711771001710017101771177100177771000001110000111000001dd510015dd100001dd510015dd1000001110000111000
+0000000000000000000017007100171771000171001710177777710017007100001ddd1001ddd10001551510015155100155151001515510001dd510015dd100
+00000000000000000001700007101777100001710017101717717101700007100115151001515d1001d1010000101d1001d1010000101d1001551d1001d15510
+000000000000000000017777771017777100017100171017111171017777771001d1010000101d1001d1001111001d1001d1001111001d1001d1010000101d10
+000000000000000000017111171016117610017111171016111161017111171001d1001111001d1001d6115555116d1001d6115555116d100161001111001610
+000000000000000000016100161016101761011666611016100161016100161001d6115dd5116d10015d65d6dd56d510015d65d6dd56d510015d11555511d510
+0000000000000000000110000110111001110011111100111001110110000110015d65d6dd56d510001ddd5dd5dd5100001ddd5dd5dd51001155d5dddd5d5511
+0000000000000000000000000000000000000000000000000000000000000000001ddd5dd5dd51000005ddd55ddd10000005ddd55ddd1000ff155556d55551ff
+00000000000000000000000000000000011111000000000000000000000000000005ddd55ddd100000015dddddd5100000015dddddd51000ff115755557511ff
+0000000000000000000000000000000001e8810000000000000000000000000000015dddddd510000011555dd55511000011555dd5551100fff1471ff1741fff
+0000000000000000000000000000000001888100000000000000000000000000001155dddd55110001c11d5555d11c1001c11d5555d11c101111471ff1741111
+000000000001000101110111000000000188810000000000000000000000000001c11d5555d11c10121c111dd11cc141141cc11dd11cc121154114ffff411451
+0000000000171017177717771000000001111100000000000000000000000000121c111dd111c1211221ccc11ccc14f11f41ccc11ccc12210154111441114510
+00000000001711171771177100000000000000000000000000000000000000001421ccc11ccc12411f21ccccccc114f11f411ccccccc12f1001221c11c122100
+00000000001777171710177710000000000000000000000000000000000000001f11cccccccc11f11f11ccccccc11ff11ff11ccccccc11f1001116ccccc11100
+00000000000111010110011100000000000000000000000000000000000000001f111cccccc111f101c11ccccc1cc1f11f1cc1cccc111c1000011cccccc11000
+00000000000000000000000000000000000000000000000000000000000000001f1cc11cc11cc1f1001cc11cc1c1111111111c1cc11cc1000001c1caac1c1000
+00000000000000000000000000000000000000000000000000000000000000000111ccc11ccc111000111cc11c122110011221c11cc111000011cc1111cc1100
+0000000000000000000000000000000000000000000000000000000000000000001211cccc112100001451ccc11111000011111ccc154100001511cccc115100
+00000000000000000000000000000000000000000000000000000000000000000011541111451100001455111111000000001111115441000015441111445100
+00000000000000000000000000000000000000000000000000000000000000000000111111110000001445111100000000000011114441000001111111111000
+00000000000000000000000000000000000000000000000000000000000000000000001111000000000111100000000000000000011110000000001111000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000111011101010100011100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000001777177717171710177700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000110070717171711011000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000001777177717771777177700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000101910000100000000900090000000000000000000000c00110000c00000c0001111111111000001111000000000000000000000111000000000010000000
+001911991001910000909000009090000000000000017100001c710c001111000011333333331100013333100011110000000000001777100000000151000100
+0011199a910191009099a9099099090000000001100cc70001ccc71001ccc7100113bbbbbbbb311013b7bb310133331000000000016878710000001651001510
+0019199a9919100109a9aa90099999901710001dc101c1001c1cc1711ccccc71113b77bbbbbbb3113bbbbbb3137bbb3100000000016878710000016551015610
+001999a9a91191199a8aa8a999a9aa997cc001ddc71000001cc11cc11c1cc1c113bb77bbbbbbbb313bdbbdb33bbbbbb300000000001687700000165511556510
+0011999aa919a9119aa88aa99a8aa8a91c101ddccc7100001dccccd11dc11cd113bbbbbbbbbbbb313bdbbdb33bdbbdb300000000000167100000111115566510
+011999aaa99a991919aaaa9119a88a910001ddccccc7100001dddd1001dddd1013bbbbbbbbbbbb3113bbbb3113bbbb3100000000070167100001199995566510
+1919a9aaa9a999190199991001999910001ddccccccc7100001111000011110013bbbddbbddbbb31000111000011100000000000001671000001999999599510
+0199aaaaaaaa9991000000000000000001ddccccccccc710000000000000000013bbbddbbddbbb31000000000000000000000000000000000010099000999510
+019aa88aa88aa99100000000000000001ddcc71ccc71ccc1000000000000000013bbbddbbddbbb31000000000000000000000000000000000019099009995100
+0199a78aa78aaa9100000000000000001ddcc11ccc11c7c1000000000000000013bbbddbbddbbb31000000000000000000000000000000000019999999991000
+001aaaaaaaaaa91000000000000000001ddcccccccccc7c10000000000000000133bbbbbbbbbb331000000000000000000000000000000000019999999910000
+0019aaa88aaa991000000000000000001ddcccc11cccccc100000000000000001133bbbbbbbb3311000000000000000000000000000000000100066669100000
+00019aaaaaa99100000000000000000001ddcccccccccc10000000000000000001133bbbbbb33110000000000000000000000000000000000010666061000000
+00001999999910000000000000000000001dddddddddd10000000000000000000011333333331100000000000000000000000000000000000001000610000000
+00000111111100000000000000000000000111111111100000000000000000000001111111111000000000000000000000000000000000000000111000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+3333333333333333333333333333333333333333cccccccccccccccccccccccccccccccc15d777776666d5510000000033333311155511115151111115533333
+3333333333773333333333333773333333333343ccccccccccccccccc77cccccccc6cccc115d676666dd55110000000033355555515155551515555551333333
+3333333377a97733333333377a97733333333353ccc7cccccccccccccccccccccccccccc5115d6ddddd5511500000000333333d6551556dd51556dd655153333
+3333377311771133333377311771133334343333ccccccccccccccccccc7ccccccccccccd51151111111115600000000333dd76dd515dd76515dd76dd5333333
+333779a7731133333377a9773113333335453333ccccc77ccccccccccccccccccccccccc6d5115555dd115d60000000033333336551556dd51556dd653333333
+3331177113333333331177113333333333533333ccccccccccc6cccccccccccccccccccc76d15dddd65115660000000033335555515155555515555551515333
+3333311333434333333311333343433333333333cccccccccccccccccccccccccccccccc7d515d67751151660000000033111111111111111111111111133333
+3333333333545333333333333354533333333333cccccccccccccccccccccccccccccc6c7d55155551d5d1d60000000033333555555151555515155555515333
+3333333333353333333333333335333333333333cccccccccccccccccccccccccccccccc7dd51111115d51d6000000003333356ddd5515566551556ddd533333
+3434333773333333343433773333333333333333cccccccccccccccccccccccccccccccc6d51155d55d6d1560000000033315d6776d515d76d515d6776333333
+3545377a977333333545779a7733333333333333ccccccccccccccccccccccccccccccccdd51566d6d75515600000000333333d66d55156ddd5155d663333333
+3353311771133333335311771133333333333333cccccccccccccccccccccccccccccccc6551d55dddd515d60000000033311555555151555511155555513333
+3333333113333333333333113333333333333333cccccccccccccccccccccccccccccccc7d15111555115dd60000000033333351111555115155515111333333
+3333333333333333333333333333333333333333ccccc6ccccccc6ccccccccccccccccccd51155511155d15d00000000333d65115555d651155d651155553333
+3333333333333333333333333333333333333333cccccccccccccccccc6cccccccccc6cc5155d6d55d6d65150000000033333335dd5d67d515d75515dd5d6333
+3333333333333333333333333333333333333333cccccccccccccccccccccccccccccccc15d67676777776510000000033335151555555515155515153333333
+565d6da9a5559a9a5a59a9a9a555d6d65a59a9a9a5559a9a5c5cccccc555cccc5c5cccccc555cccc5c5cccccc555cccc33333333333333335151111115551111
+656555555a5a5555a5a555555a565555a5a555555a5a5555c5c555555c5c5555c5c555555c5c5555c5c555555c5c555533333333333333331515555551515555
+5d556dd6559556dd59556dd655d556dd59556dd6559556dd5c556dd655c556dd5c556dd655c556dd5c556dd655c556dd333333333313333351556dd6551556dd
+565dd76dd5a5dd765a5dd76dd565dd765a5dd76dd5a5dd765c5dd76dd5c5dd765c5dd76dd5c5dd765c5dd76dd5c5dd763133336333133333515dd76dd515dd76
+5d556dd6559556dd59556dd655d556dd59556dd6559556dd5c556dd655c556dd5c556dd655c556dd5c556dd655c556dd313363d35313533d51556dd6551556dd
+556555555a5a555555a555555a56555555a555555a5a555555c555555c5c555555c555555c5c555555c555555c5c555555335355535355355515555551515555
+d6d6da9a99a9a9a99a9a9a9a99ad6d6d9a9a9a9a99a9a9a9cccccccccccccccccccccccccccccccccccccccccccccccc11131111131111311111111111111111
+55656555555a5a5555a5a5555556565555a5a555555a5a5555c5c555555c5c5555c5c555555c5c5555c5c555555c5c5555151555555151355515155555515155
+655d556ddd5595566559556ddd55d5566559556ddd559556655c556ddd55c556655c556ddd55c556655c556ddd55c5566551556ddd5515566551556ddd551556
+6d565d6776d5a5d76d5a5d6776d565d76d5a5d6776d5a5d76d5c5d6776d5c5d76d5c5d6776d5c5d76d5c5d6776d5c5d76d515d6776d515d76d513d6773d515d7
+dd5d55d66d55956ddd5955d66d55d56ddd5955d66d55956ddd5c55d66d55c56ddd5c55d66d55c56ddd5c55d66d55c56ddd5155d66d55156d3d3135d663551363
+55d6d555555a5a55559a955555565655559a9555555a5a5555ccc555555c5c5555ccc555555c5c5555ccc555555c5c5555111555555151553531353553535353
+56555659a9a555a95a555a59a9a5556d5a555a59a9a555a95c555c5cccc555cc5c555c5cccc555cc5c555c5cccc555cc51555151111555113135313113135333
+d55d65995555d65a955d65995555d656955d65995555d65ac55d65cc5555d65cc55d65cc5555d65cc55d65cc5555d65c155d65115555d651333d333133533333
+65d755a5dd5d67d5a5d755a5dd5d67d5a5d755a5dd5d67d5c5d755c5dd5d67d5c5d755c5dd5d67d5c5d755c5dd5d67d515d75515dd5d67d53333333333333333
+5655565a5555555a5a555a5a555555565a555a5a5555555a5c555c5c5555555c5c555c5c5555555c5c555c5c5555555c51555151555555513333333333333333
+__map__
+d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d40000000000000000000000000000000000000000000000a80000000000a8000000acad00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4c2c3d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d40000000000000000000000000000000000000000000000b8b90000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d2d3d4d4c4d4d4d4d4c0c1d4d4d4d4d4c0c1d4d4d4d4c2c3d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d0d1d4d4d4d4d4d0d1d4d4d4d4d2d3d4d4d4c2c3d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4c0c1d4d4c2c3d4d4d4c4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d2d3d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d0d1d4d4d2d3d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4c0c1d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4c2c3d4d4c4d4d4c0c1d4d4d4d4d4d4d0d1d4d4d4c4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d2d3d4d4d4d4d4d0d1d4d4c2c3d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4c4d4d4d4c4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d2d3d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4c0c1d4d4d4d4c4d4d4d4d4d4d4d4d4c2c3d4d4d4c4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4c0c1d4d4d4d4d4d0d1d4d4d4d4d4d4d4d4d4d4d4d4d4d2d3d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d0d1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4c4d4d4d4d4d4d4d4d4d4c0c1d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4c2c3d4d4d4d4c0c1d4d4d4d4d4c0c1d4d4d4d4d4d4d0d1d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4c4d4d4d4d4d2d3d4d4d4d4d0d1d4d4d4d4d4d0d1d4d4c0c1d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d0d1d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4c0c1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d0d1d4d4d4d4c0c1d4d4d4d4d4d4d4d4c4d4d4d4d4d4d4d4d4c2c3d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d0d1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d2d3d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d4d4d4d4c0c1d4d4d4d4d4c0c1d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d4d4d4d4d0d1d4d4d4d4d4d0d1d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4c0c1d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4c0c1d4d4d4d4d4c0c1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d0d1d4d4d4d4d4009d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d0d1d4d4d4d4d4d0d1d4d4d4d4d4d4d4d4c0c1d4c4d4d4d4d4d4d4c4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4d4d4d4d4d4d4c2c3d4d4d4d4d0d1d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4c2c3d4d4d4d4c0c1d4d4d4d4d2d3d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d2d3d4d4d4d4d0d1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4c0c1d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4c4d4d4d4d4c2c3d4d4d4d4c0c1d4d4d4c2c3d4d4d0d1d4d4c2c3d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4d4d4d4c4d4d4d2d3d4d4d4d4d0d1d4d4d4d2d3d4d4d4d4d4d4d2d3d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d4d4d4d4c4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+c0c1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4c4d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d0d1d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+__sfx__
+000100000f000100000f00018000297002670025700217001e7001c7001b7001a7001870016700137000e7000d7000a7000670002700021000150001600016000870006700057000370002500017000250002500
+0001000000000000000000000000000000e050190501e050210502205022050170500c0500805005050040500405004050040500505008050090500c0500f050140501b0502905009050090500a0500d05002600
+001a00000c0040c0020c0020c0020c0020c0020c0020c0050f0020f0020f0040f0020f0020f0020f0020f0020f0020f0020f0020f0050e0000c0040e0040e0020e0020e0020e0020e0020e0020e0020e0050e005
+000100000a0000b0000e0240f0201002012020130201502017020190201c0201f02021020240251c700217003c7003f705280002b0002d0003100034000390052300025000280002b0002d000310003400039005
+001a000000000000000000000000000000000000000000000000200005000020000200002000020000200002000020000500002000020000500002000020000200002000020000200002000050c0020000200002
+0001000030000100003200034000350001100010000110001200015000180001d00022000260001f0002b00030000140003200035000360001000037000370000f0003700037000110003600035000320001f000
+__music__
+00 42444444
+
