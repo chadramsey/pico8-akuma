@@ -1,2 +1,2 @@
 ## Akuma
-# A top-down adventure for the PICO-8
+### A top-down adventure for the PICO-8
