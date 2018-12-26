@@ -6,5 +6,5 @@ Akuma is a project first intended for submission to [Game Off 2018](https://itch
 ![](https://chadramsey.github.io/assets/images/2018/akuma_damage_soul.gif)
 
 ### Versions
-#### v0.1.0
+#### [v0.1.0](https://github.com/chadramsey/pico8-akuma/releases/tag/v0.1.0)
 This is the initial release. If anyone finds an issue or sees an opportunity to optimize to expand the code please open an issue or submit a pull request accordingly. 
